@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "repo": {
+    "name": "bb-game-skills",
+    "url": "https://github.com/bb-game/skills.git",
+    "branch": "main"
+  },
+  "skills": [
+    {
+      "name": "knowledge-base",
+      "path": "knowledge-base"
+    },
+    {
+      "name": "skills-manager",
+      "path": "skills-manager"
+    }
+  ]
+}

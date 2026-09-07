@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Agent-neutral installer and updater for a Git-managed Skills collection."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+
+DEFAULT_REPO_URL = "https://github.com/bb-game/skills.git"
+DEFAULT_BRANCH = "main"
+
+AGENT_TARGETS = {
+    "codex": Path.home() / ".codex" / "skills",
+    "claude": Path.home() / ".claude" / "skills",
+    "shared": Path.home() / ".agents" / "skills",
+}
+
+
+@dataclass(frozen=True)
+class Skill:
+    name: str
+    path: str
+
+
+def data_home() -> Path:
+    if os.environ.get("SKILLS_MANAGER_HOME"):
+        return Path(os.environ["SKILLS_MANAGER_HOME"]).expanduser()
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        return base / "skills-manager"
+    return Path.home() / ".local" / "share" / "skills-manager"
+
+
+def repo_dir() -> Path:
+    return data_home() / "repos" / "bb-game-skills"
+
+
+def print_json(payload: object) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def load_manifest(source: Path) -> dict:
+    manifest_path = source / "skills.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"manifest not found: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid manifest: {exc}") from exc
+    if manifest.get("schema_version") != 1:
+        raise RuntimeError("unsupported skills.json schema_version")
+    return manifest
+
+
+def manifest_skills(manifest: dict) -> list[Skill]:
+    skills: list[Skill] = []
+    for item in manifest.get("skills", []):
+        name = str(item.get("name", "")).strip()
+        path = str(item.get("path", "")).strip("/")
+        if not name or not path or "/" in name:
+            raise RuntimeError("each skill requires a safe name and path")
+        if name.startswith("."):
+            raise RuntimeError(f"unsafe skill name: {name}")
+        skills.append(Skill(name=name, path=path))
+    if not skills:
+        raise RuntimeError("skills.json does not define any skills")
+    return skills
+
+
+def parse_agents(value: str | None) -> list[str]:
+    if value is None:
+        return ["codex", "claude"]
+    agents = [item.strip() for item in value.split(",") if item.strip()]
+    unknown = [item for item in agents if item not in AGENT_TARGETS]
+    if unknown:
+        raise RuntimeError(f"unknown agents: {', '.join(unknown)}")
+    if not agents:
+        raise RuntimeError("no agents selected")
+    return agents
+
+
+def read_frontmatter(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    fields: dict[str, str] = {}
+    with path.open(encoding="utf-8") as handle:
+        if handle.readline().rstrip() != "---":
+            return fields
+        for line in handle:
+            line = line.rstrip()
+            if line == "---":
+                break
+            key, separator, value = line.partition(":")
+            if separator:
+                fields[key.strip()] = value.strip()
+    return fields
+
+
+def ensure_repo(clone_url: str, branch: str) -> Path:
+    target = repo_dir()
+    if target.exists():
+        if not (target / ".git").is_dir():
+            raise RuntimeError(f"managed repository path is not a Git repository: {target}")
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_dir = Path(tempfile.mkdtemp(prefix=".bb-game-skills-", dir=target.parent))
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--branch", branch, clone_url, str(temp_dir)],
+            check=True,
+        )
+        temp_dir.rename(target)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return target
+
+
+def fetch_repo(source: Path, clone_url: str, branch: str) -> None:
+    env = os.environ.copy()
+    subprocess.run(
+        ["git", "-C", str(source), "remote", "set-url", "origin", clone_url],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "fetch", "--depth", "1", "origin", branch],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "reset", "--hard", f"FETCH_HEAD"],
+        check=True,
+        env=env,
+    )
+
+
+def source_version(source: Path, skill: Skill) -> str:
+    return read_frontmatter(source / skill.path / "SKILL.md").get("version", "unknown")
+
+
+def installed_version(target_root: Path, skill: Skill) -> str:
+    return read_frontmatter(target_root / skill.name / "SKILL.md").get("version", "unknown")
+
+
+def install_executable(source: Path) -> Path:
+    script = source / "skills-manager" / "bin" / "skills-manager"
+    if not script.is_file():
+        return repo_dir() / "skills-manager" / "bin" / "skills-manager"
+    target = data_home() / "bin" / "skills-manager"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(script, target)
+    target.chmod(0o755)
+    cmd_source = Path(f"{script}.cmd")
+    cmd_target = Path(f"{target}.cmd")
+    if cmd_source.is_file():
+        shutil.copy2(cmd_source, cmd_target)
+    if os.name == "nt" and cmd_target.is_file():
+        return cmd_target
+    return target
+
+
+def sync_skill(source: Path, skill: Skill, agent: str, backup: bool) -> tuple[bool, str, str]:
+    source_dir = source / skill.path
+    skill_file = source_dir / "SKILL.md"
+    if not skill_file.is_file():
+        raise RuntimeError(f"skill has no SKILL.md: {skill.name}")
+    target_root = AGENT_TARGETS[agent].expanduser()
+    target_dir = target_root / skill.name
+    if target_dir.resolve() == source_dir.resolve():
+        raise RuntimeError(f"refusing to sync a managed repository into itself: {target_dir}")
+    if target_dir.exists() and target_dir.is_symlink():
+        target_dir.unlink()
+    elif target_dir.exists():
+        if backup:
+            backup_dir = data_home() / "backups" / agent / f"{skill.name}.bak"
+            shutil.rmtree(backup_dir, ignore_errors=True)
+            backup_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(target_dir, backup_dir)
+        shutil.rmtree(target_dir)
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_dir, target_dir)
+    return True, source_version(source, skill), installed_version(target_root, skill)
+
+
+def git_changed(source: Path, skill_path: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(source), "diff", "--name-only", "HEAD@{1}", "HEAD", "--", skill_path],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def update(args: argparse.Namespace) -> int:
+    manifest_url = args.repo or DEFAULT_REPO_URL
+    branch = args.branch
+    agents = parse_agents(args.agents)
+    first_run = not repo_dir().exists()
+    source = ensure_repo(manifest_url, branch)
+
+    if not first_run:
+        fetch_repo(source, manifest_url, branch)
+    executable = install_executable(source)
+    manifest = load_manifest(source)
+    if args.repo or args.branch:
+        manifest_url = manifest.get("repo", {}).get("url", manifest_url)
+        branch = manifest.get("repo", {}).get("branch", branch)
+    skills = manifest_skills(manifest)
+    if args.skill:
+        requested = {item.strip() for item in args.skill.split(",") if item.strip()}
+        known = {item.name for item in skills}
+        missing = requested - known
+        if missing:
+            raise RuntimeError(f"skills not in manifest: {', '.join(sorted(missing))}")
+        skills = [item for item in skills if item.name in requested]
+
+    results = []
+    for skill in skills:
+        if not first_run and args.skill is None and not git_changed(source, skill.path):
+            results.append({
+                "skill": skill.name,
+                "agents": [],
+                "changed": False,
+                "version": source_version(source, skill),
+            })
+            continue
+        synced = [sync_skill(source, skill, agent, args.backup)[0] for agent in agents]
+        results.append({
+            "skill": skill.name,
+            "agents": [agent for agent, installed in zip(agents, synced) if installed],
+            "changed": True,
+            "version": source_version(source, skill),
+        })
+
+    print_json({
+        "repository": {
+            "path": str(source),
+            "url": manifest_url,
+            "branch": branch,
+            "head": subprocess.run(
+                ["git", "-C", str(source), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+        },
+        "executable": str(executable),
+        "updated": results,
+    })
+    print("Skills updated. New instructions are available on the next agent turn.", file=sys.stderr)
+    return 0
+
+
+def status(args: argparse.Namespace) -> int:
+    source = repo_dir()
+    if not source.exists():
+        print_json({"installed": False, "repository": None, "skills": []})
+        return 0
+    manifest = load_manifest(source)
+    agents = parse_agents(args.agents)
+    items = []
+    for skill in manifest_skills(manifest):
+        remote_version = source_version(source, skill)
+        installations = {}
+        for agent in agents:
+            installations[agent] = installed_version(AGENT_TARGETS[agent], skill)
+        items.append({
+            "skill": skill.name,
+            "version": remote_version,
+            "installed": installations,
+            "up_to_date": all(value == remote_version for value in installations.values()),
+        })
+    print_json({
+        "installed": True,
+        "repository": {
+            "path": str(source),
+            "branch": subprocess.run(
+                ["git", "-C", str(source), "rev-parse", "--abbrev-ref", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+            "head": subprocess.run(
+                ["git", "-C", str(source), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+        },
+        "skills": items,
+    })
+    return 0
+
+
+def check(args: argparse.Namespace) -> int:
+    manifest_url = args.repo or DEFAULT_REPO_URL
+    branch = args.branch
+    agents = parse_agents(args.agents)
+    first_run = not repo_dir().exists()
+    source = ensure_repo(manifest_url, branch)
+    if not first_run:
+        fetch_repo(source, manifest_url, branch)
+    manifest = load_manifest(source)
+    items = []
+    for skill in manifest_skills(manifest):
+        remote_version = source_version(source, skill)
+        installations = {
+            agent: installed_version(AGENT_TARGETS[agent], skill)
+            for agent in agents
+        }
+        up_to_date = all(value == remote_version for value in installations.values())
+        items.append({
+            "skill": skill.name,
+            "remote_version": remote_version,
+            "installed": installations,
+            "update_available": not up_to_date,
+        })
+    print_json({
+        "repository": {"path": str(source), "branch": branch},
+        "skills": items,
+        "updates_available": any(item["update_available"] for item in items),
+    })
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage bb-game Agent Skills")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    update_parser = subparsers.add_parser("update", help="fetch and update Skills")
+    update_parser.add_argument("--skill", help="comma-separated skill names")
+    update_parser.add_argument("--agents", help="comma-separated agents: codex,claude,shared")
+    update_parser.add_argument("--repo", help="override the Skills repository URL")
+    update_parser.add_argument("--branch", default=DEFAULT_BRANCH, help="Skills repository branch")
+    update_parser.add_argument("--backup", action=argparse.BooleanOptionalAction, default=True)
+    update_parser.set_defaults(handler=update)
+
+    status_parser = subparsers.add_parser("status", help="show installed versions")
+    status_parser.add_argument("--agents", help="comma-separated agents: codex,claude,shared")
+    status_parser.set_defaults(handler=status)
+
+    check_parser = subparsers.add_parser("check", help="compare installed Skills with the remote repository")
+    check_parser.add_argument("--agents", help="comma-separated agents: codex,claude,shared")
+    check_parser.add_argument("--repo", help="override the Skills repository URL")
+    check_parser.add_argument("--branch", default=DEFAULT_BRANCH, help="Skills repository branch")
+    check_parser.set_defaults(handler=check)
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        return args.handler(args)
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"skills-manager: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
