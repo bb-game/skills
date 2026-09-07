@@ -1,7 +1,7 @@
 ---
 name: knowledge-base
 description: 平台知识库与用户长期记忆。遇到公司/项目/业务事实先查知识库;遇到用户偏好/历史约定/继续先前任务先查记忆;用户要求记住或确认持久决策时保存记忆。
-version: 2026.09.07
+version: 2026.09.07.1
 source: https://github.com/bb-game/skills
 ---
 
@@ -63,13 +63,24 @@ source: https://github.com/bb-game/skills
 
 优先导入原始文件；只有没有对应文件时才导入已确认的文本结论。
 
+更新：
+- 用户明确说“更新/替换/修正知识库文档”时，先调用 `kb_documents` 定位 `document_id`，再用 `kb_update` 替换。
+- 用户明确说“某段/分段/chunk 有错误，只改这一段”时，先用 `kb_chunks` 定位 `chunk_id`，再用 `kb_update_chunk`；检索结果里带出的 `document_id` 和 `chunk_id` 也可直接使用。
+- 不确定目标文档时先列出文档并请用户确认；不要静默覆盖。
+- `kb_update` 只替换一份文档；paths 和 content 二选一。
+- `kb_update_chunk` 只改一个分段，不影响同一文档的其他分段。
+
 ## 工具速查
 
 | 工具 | 何时用 |
 |---|---|
 | `kb_list` | 首次使用知识库、确定 `kb_ids`、或导入前了解范围 |
 | `kb_search(query, kb_ids?, top_k?)` | 检索组织权威事实；内部事实/业务规则/项目文档优先使用 |
+| `kb_documents(kb_ids?, keywords?, page_size?)` | 列出文档和 `document_id`；更新/删除前定位目标 |
 | `kb_import(paths?, content?, title?, kb_ids?)` | 导入本机文件或已确认结果；先 `kb_list` 确认可写目标 |
+| `kb_update(document_id, kb_id?, paths?/content?, title?)` | 明确要求更新/替换文档时使用；先定位 `document_id` |
+| `kb_chunks(document_id, kb_id?, keywords?, page?, page_size?)` | 列出分段和 `chunk_id`；分段修正前定位目标 |
+| `kb_update_chunk(chunk_id, document_id, kb_id?, content?/available?/important_keywords?)` | 明确要求修正某个分段时使用；只改该分段 |
 | `memory_save(content, session_id?)` | 保存长期偏好、项目约定、已确认决策；保存前先查重 |
 | `memory_search(query, limit?)` | 混合语义+关键词查找记忆；继续任务或历史偏好优先使用 |
 | `memory_forget(message_id)` | 遗忘某条记忆；ID 从 list/search 获得 |
