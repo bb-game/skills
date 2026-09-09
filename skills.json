@@ -11,8 +11,8 @@
       "path": "knowledge-base"
     },
     {
-      "name": "tokenhub-memory",
-      "path": "tokenhub-memory"
+      "name": "knowledge-memory",
+      "path": "knowledge-memory"
     },
     {
       "name": "skills-manager",

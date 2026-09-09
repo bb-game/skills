@@ -1,14 +1,14 @@
 ---
-name: tokenhub-memory
+name: knowledge-memory
 description: 通过 TokenHub MCP 使用用户长期记忆和 Agent Skill。用户要求记住/查找历史约定/继续先前偏好，或需要复用可执行流程时使用。
-version: 2026.09.09.1
+version: 2026.09.09.2
 source: https://github.com/TencentCloud/TencentDB-Agent-Memory
 ---
 
 # TokenHub Long-term Memory
 
-这个 Skill 配合 TokenHub MCP Server `tokenhub-memory` 使用。客户端只需要支持 MCP；
-身份由 TokenHub Gateway 在 `/mcp/tokenhub-memory` 请求中注入，Agent 或用户不要伪造
+这个 Skill 配合 TokenHub MCP Server `knowledge-base` 使用。客户端只需要支持 MCP；
+身份由 TokenHub Gateway 在 `/mcp/knowledge-base` 请求中注入，Agent 或用户不要伪造
 `x-tokenhub-user`，也不要让一个 Agent 操作其他人的记忆。
 
 ## 何时检索
