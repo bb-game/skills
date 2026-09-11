@@ -1,8 +1,8 @@
 ---
 name: knowledge-memory
 description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。用户询问公司/项目/业务/产品等内部事实先查知识库；提到历史约定、个人偏好或继续先前任务先查记忆；需要复用或沉淀流程时用 Skill。
-version: 2026.09.11.3
-source: https://github.com/TencentCloud/TencentDB-Agent-Memory
+version: 2026.09.12.1
+source: https://github.com/volcengine/OpenViking
 ---
 
 # 知识库与记忆
@@ -76,17 +76,31 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 - 当前任务涉及部署约束、权限边界、命名规则、沟通偏好或稳定决策。
 - 用户要求查找以前说过的结论，或答案依赖历史上下文。
 
-调用时传入当前客户端的真实 `query`；需要原始对话时设置
-`include_conversations=true`。`memory_recall` 只覆盖 L1 原子事实和 L0 原始对话，
-需要 L3 工作准则时改用 `memory_core_read`。没有命中的记忆必须明说“没有找到”，
+调用时传入当前客户端的真实 `query`；需要检索会话归档里的原始对话时设置
+`include_conversations=true`。`memory_recall` 覆盖长期记忆与会话归档，
+需要核心准则时改用 `memory_core_read`。没有命中的记忆必须明说“没有找到”，
 不要虚构。
 
-记忆分层提炼：L0 原始对话 → L1 原子事实 → L2 场景 → L3 工作准则。层级越高越稳定，
-回答和执行前优先相信高层内容。
+记忆底座的形态：每轮对话先落进**会话归档**，底座在后台按会话批量提炼成
+**长期记忆**（偏好 / 实体 / 事件），核心准则单独存放在 `soul.md`。
+记忆按 TokenHub 用户隔离——同一个用户的 Codex、Claude、OpenCode 共享同一份记忆，
+不存在 per-agent 的记忆空间。
+
+**谁负责写入**：
+
+- 在 TokenHub 控制台的 Agent Chat 里，网关会**自动**把每轮对话追加进会话归档，
+  不要再调用 `memory_capture`，否则同一轮会被记两遍。
+- 通过 MCP 接入的其他客户端（Codex / Claude Code / OpenCode 等），网关看不到你们的
+  对话，**没有自动写入**：有沉淀价值的轮次要自己调用 `memory_capture`。
+
+**提炼是批量异步的**，不是即时生效：底座要等会话攒够一批消息、累计 token 到量，
+或空闲一段时间后才提炼。所以刚说完的内容不一定马上能被 `memory_recall` 搜到。
+需要立刻生效、且必须长期稳定的规则，直接用 `memory_scene_write` /
+`memory_core_write` 写死，不要指望自动提炼。
 
 ## 记忆的写入
 
-只有两类内容调用 `memory_capture`：
+符合下面两类内容的轮次，在 MCP 客户端里用 `memory_capture` 追加进会话归档：
 
 1. 用户明确要求记住。
 2. 对话包含长期价值：稳定偏好、项目约束、关键决策、复用结论。
@@ -94,17 +108,19 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 不要保存临时调试过程、密码、Token、私钥、手机号、身份证等敏感数据。
 如果用户要求保存凭据，先建议改用平台的凭据存储；拒绝后也不要写入记忆。
 
-L0 原始对话与 L1 原子事实默认只保留最近 7 天（网关每天北京时间 03:00 清理，
-存量过少时自动跳过），所以**需要长期留存的内容必须落到 L2 或 L3**。
+**会话归档只保留最近 7 天**（每天北京时间 04:10 清理），事件类记忆同样 7 天过期；
+偏好、实体与核心准则长期保留。所以**需要长期留存的内容要用 `memory_scene_write`
+落到稳定路径**，不要指望会话归档。
 
 已确认的规则、约束或工作流用 `memory_scene_write` 写入稳定路径：
 
-- `project/<topic>.md`：项目部署、架构、权限、发版规则。
-- `preferences/<topic>.md`：沟通和协作偏好。
+- `preferences/<topic>.md`：沟通和协作偏好（长期保留）。
+- `entities/<topic>/<name>.md`：项目、服务、人物等实体（长期保留）。
+- `events/<YYYY>/<MM>/<DD>/<topic>.md`：一次性事件（7 天后过期）。
 
-路径必须相对且稳定，例如 `project/deploy.md`，不要使用临时会话路径。
+路径必须相对且稳定，例如 `preferences/communication.md`，不要使用临时会话路径。
 
-## 工作准则（L3）
+## 核心准则
 
 涉及长期准则、跨项目偏好或团队规范时，先调用 `memory_core_read` 了解当前内容；
 不要在未确认的情况下覆盖写入。
@@ -120,9 +136,9 @@ L0 原始对话与 L1 原子事实默认只保留最近 7 天（网关每天北�
 
 需要复用已有流程时先调用 `skill_search`，找到后用 `skill_get` 读取全文，再执行。
 
-用户明确要求沉淀新 Skill 时调用 `skill_create`（content 推荐 YAML
-frontmatter 格式，含 name/description）。更新已有 Skill 先 `skill_get`
-确认内容，再调 `skill_update` 并传入当前 `expected_version`。
+用户明确要求沉淀新 Skill 时调用 `skill_create`（content 使用 Claude Skills 的
+SKILL.md 格式，frontmatter 必须含 name/description）。更新已有 Skill 先
+`skill_get` 确认内容，再调 `skill_update` 用新内容整体替换。
 
 开始复杂工作前可调用 `skill_listing` 了解当前 Agent 有哪些可用 Skill。
 
@@ -135,18 +151,18 @@ frontmatter 格式，含 name/description）。更新已有 Skill 先 `skill_get
 | `kb_import` | 导入本机文件或已确认结论；先 `kb_list` 确认目标库 |
 | `kb_documents` | 列出文档状态、分块数和时间；整理或删除前定位目标 |
 | `kb_status` | 查看文档状态统计和解析管线进度 |
-| `memory_recall` | 检索 L1 原子事实，可选同时搜 L0 原始对话 |
-| `memory_capture` | 把一轮有长期价值的对话写入 L0 流水线 |
-| `memory_scene_write` | 把已确认的规则、约束或工作流写入 L2 场景 |
-| `memory_core_read` | 读取 L3 工作准则 |
-| `memory_core_write` | 全量覆盖 L3 工作准则（先读再写） |
+| `memory_recall` | 检索长期记忆，可选同时检索会话归档 |
+| `memory_capture` | 把一轮有长期价值的对话追加进会话归档（仅 MCP 客户端需要手动调） |
+| `memory_scene_write` | 把已确认的规则、约束或工作流写入稳定路径的长期记忆 |
+| `memory_core_read` | 读取核心准则（soul.md） |
+| `memory_core_write` | 全量覆盖核心准则（先读再写） |
 | `skill_listing` / `skill_search` / `skill_get` | 发现和读取可复用 Skill |
 | `skill_create` / `skill_update` / `skill_extract` | 新建、更新、从对话抽取 Skill |
 
 ## 隔离与可删除性
 
-- `agent_id` 默认是 `default`；Codex、Claude、OpenCode 等客户端可传入不同值，
-  用同一 TokenHub 用户下的独立记忆空间。
+- 记忆按 TokenHub **用户**隔离：同一用户的任意 Agent 共享同一份记忆，无法
+   （也不应）跨用户读取或写入。
 - 用户可在 Console「知识库与记忆」查看、搜索和删除知识库文档、记忆与 Skill。
-- L3 工作准则可在 Console「知识库与记忆 → 记忆 → 工作准则」查看和编辑。
+- 核心准则可在 Console「知识库与记忆 → 记忆 → 工作准则」查看和编辑。
 - 删除前应向用户确认，删除是不可恢复的数据面操作。
