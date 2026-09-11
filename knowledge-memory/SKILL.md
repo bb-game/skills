@@ -1,20 +1,74 @@
 ---
 name: knowledge-memory
-description: 通过 TokenHub MCP 使用用户长期记忆和 Agent Skill。用户要求记住/查找历史约定/继续先前偏好，或需要复用可执行流程时使用。
-version: 2026.09.11.1
+description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。用户询问公司/项目/业务/产品等内部事实先查知识库；提到历史约定、个人偏好或继续先前任务先查记忆；需要复用或沉淀流程时用 Skill。
+version: 2026.09.11.2
 source: https://github.com/TencentCloud/TencentDB-Agent-Memory
 ---
 
-# TokenHub Long-term Memory
+# 知识库与记忆
 
-这个 Skill 配合 TokenHub MCP Server `knowledge-base` 使用。客户端只需要支持 MCP；
-身份由 TokenHub Gateway 在 `/mcp/knowledge-base` 请求中注入，Agent 或用户不要伪造
-`x-tokenhub-user`，也不要让一个 Agent 操作其他人的记忆。
+这个 Skill 配合 TokenHub MCP Server `knowledge-base` 使用，它同时提供知识库、长期记忆和
+Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gateway 在
+`/mcp/knowledge-base` 请求中注入，Agent 或用户不要伪造 `x-tokenhub-user`，也不要让
+一个 Agent 操作其他人的记忆。
 
-记忆分层提炼：L0 原始对话 → L1 原子事实 → L2 场景 → L3 工作准则。层级越高越稳定，
-回答和执行前优先相信高层内容。
+**知识库 = 组织的权威事实；记忆 = 这位用户/项目的历史与偏好。** 两者冲突时以知识库为准，
+并把冲突告诉用户。
 
-## 何时检索
+## 自动触发规则
+
+必须主动检索知识库：
+
+- 用户问“我们的/公司/项目/产品/业务/流程/规范/需求/数据”等内部事实。
+- 你要声称组织约定、指标、部署方式、负责人或业务规则，但本会话内没有可靠依据。
+- 用户说“查文档 / 查知识库 / 看看资料”。
+
+必须主动检索记忆：
+
+- 用户说“继续刚才 / 按之前的约定 / 我偏好 / 我们项目里”。
+- 任务涉及部署约束、权限边界、命名规则、沟通偏好或稳定决策。
+- 开始一个非琐碎的项目任务前，先用 3~6 个关键词查一次相关记忆；不要每个回合都查。
+
+不要检索：纯通用知识、语言语法、公开 API、数学计算，以及当前工作区代码已经能回答的问题。
+
+## 决策顺序
+
+1. 组织事实优先 `kb_search`；用户偏好／历史约定优先 `memory_recall`。
+2. 两者都可能相关时，先 `memory_recall` 取任务上下文，再 `kb_search` 查权威依据。
+3. 单个问题最多做两轮检索；第二轮必须换更精准的关键词或范围，不要重复同一查询。
+4. 知识库与记忆冲突时，以知识库为权威事实，并把冲突告诉用户。
+5. 回答内部事实时注明来源文档名；来自记忆时说明这是历史约定或用户偏好。
+
+## 知识库检索
+
+`kb_search` 的检索设置与控制台一致；不指定参数时默认返回上下文，适合 Agent 自己组织答案。
+
+| 参数 | 默认 | 何时调整 |
+|---|---:|---|
+| `mode` | `mix` | 一般内部问题保持 `mix`；精确术语用 `hybrid`，局部机制用 `local`，主题综述用 `global`，只要纯切片召回用 `naive` |
+| `only_need_context` | `true` | Agent 保持 `true`；只有希望引擎直接生成最终答案时才传 `false` |
+| `top_k` | `8` | 问题宽泛、来源分散时提到 12~20；精确查询保持 5~8 |
+| `enable_rerank` | `true` | 保持开启；确认要更快、更原始的召回时才关闭 |
+| `include_chunk_content` | `true` | 需要核对原文或引用时开启；只看文档名和结论时可关闭 |
+
+`kb_id` 缺省为公司库；涉及特定项目时先用 `kb_list` 拿到该项目 `kb_id` 再传。
+
+## 何时导入知识库
+
+导入：
+
+- 用户明确说“导入 / 存进知识库 / 加入公司文档”。
+- 用户要求把某个文件或当前已确认的结果沉淀为组织知识。
+
+不导入：
+
+- 中间过程、未确认方案、临时日志、含密钥的内容。
+
+优先导入原始文件（`kb_import` 的 `paths`）；只有没有对应文件时才用 `content` 传已确认的文本结论，
+并用 `title` 起一个可检索的来源名。导入是写操作，目标库需要有导入权限；不确定目标时先
+`kb_list` 并请用户确认，不要静默写入。
+
+## 记忆的检索
 
 在回答或执行前调用 `memory_recall`，重点场景包括：
 
@@ -27,7 +81,10 @@ source: https://github.com/TencentCloud/TencentDB-Agent-Memory
 需要 L3 工作准则时改用 `memory_core_read`。没有命中的记忆必须明说“没有找到”，
 不要虚构。
 
-## 何时写入
+记忆分层提炼：L0 原始对话 → L1 原子事实 → L2 场景 → L3 工作准则。层级越高越稳定，
+回答和执行前优先相信高层内容。
+
+## 记忆的写入
 
 只有两类内容调用 `memory_capture`：
 
@@ -69,10 +126,27 @@ frontmatter 格式，含 name/description）。更新已有 Skill 先 `skill_get
 
 开始复杂工作前可调用 `skill_listing` 了解当前 Agent 有哪些可用 Skill。
 
+## 工具速查
+
+| 工具 | 何时用 |
+|---|---|
+| `kb_list` | 首次使用知识库、确定 `kb_id`，或导入前确认范围 |
+| `kb_search` | 检索组织权威事实；内部事实、业务规则、项目文档优先用它 |
+| `kb_import` | 导入本机文件或已确认结论；先 `kb_list` 确认目标库 |
+| `kb_documents` | 列出文档状态、分块数和时间；整理或删除前定位目标 |
+| `kb_status` | 查看文档状态统计和解析管线进度 |
+| `memory_recall` | 检索 L1 原子事实，可选同时搜 L0 原始对话 |
+| `memory_capture` | 把一轮有长期价值的对话写入 L0 流水线 |
+| `memory_scene_write` | 把已确认的规则、约束或工作流写入 L2 场景 |
+| `memory_core_read` | 读取 L3 工作准则 |
+| `memory_core_write` | 全量覆盖 L3 工作准则（先读再写） |
+| `skill_listing` / `skill_search` / `skill_get` | 发现和读取可复用 Skill |
+| `skill_create` / `skill_update` / `skill_extract` | 新建、更新、从对话抽取 Skill |
+
 ## 隔离与可删除性
 
 - `agent_id` 默认是 `default`；Codex、Claude、OpenCode 等客户端可传入不同值，
   用同一 TokenHub 用户下的独立记忆空间。
-- 用户可在 Console「知识库与记忆 → 记忆」查看、搜索和删除记忆与 Skill。
+- 用户可在 Console「知识库与记忆」查看、搜索和删除知识库文档、记忆与 Skill。
 - L3 工作准则可在 Console「知识库与记忆 → 记忆 → 工作准则」查看和编辑。
 - 删除前应向用户确认，删除是不可恢复的数据面操作。
