@@ -11,7 +11,7 @@ source: https://github.com/bb-game/skills
 
 ## 自动触发
 
-- 用户说“更新 skills / 更新 knowledge-base / 检查 skills 版本”。
+- 用户说“更新 skills / 更新 knowledge-memory / 检查 skills 版本”。
 - 用户要求安装 bb-game 的某个 Skill。
 - 用户反馈 Skill 行为像旧版本，且远端仓库已发布新版本。
 
@@ -38,7 +38,7 @@ skills-manager update
 只更新一个 Skill：
 
 ```bash
-skills-manager update --skill knowledge-base
+skills-manager update --skill knowledge-memory
 ```
 
 同步到共享目录：
