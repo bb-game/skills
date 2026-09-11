@@ -7,10 +7,6 @@
   },
   "skills": [
     {
-      "name": "knowledge-base",
-      "path": "knowledge-base"
-    },
-    {
       "name": "knowledge-memory",
       "path": "knowledge-memory"
     },
