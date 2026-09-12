@@ -75,15 +75,27 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 - 当前任务涉及部署约束、权限边界、命名规则、沟通偏好或稳定决策。
 - 用户要求查找以前说过的结论，或答案依赖历史上下文。
 
-调用时传入当前客户端的真实 `query`；需要检索会话归档里的原始对话时设置
+调用时传入当前客户端的真实 `query`，**并始终传 `project` = 当前工作目录名**
+（如 `llm_token_hub`）。同一件事在项目 A 与项目 B 下是两份互不可见的记忆：
+不传 `project` 只会读到「通用记忆」，看不到你在项目里沉淀的结论，写进去的东西
+也不会被项目里的下一次会话召回。需要检索会话归档里的原始对话时设置
 `include_conversations=true`。`memory_recall` 覆盖长期记忆与会话归档，
 需要核心准则时改用 `memory_core_read`。没有命中的记忆必须明说“没有找到”，
 不要虚构。
 
+`project` 由你声明：客户端不一定能识别出项目，识别不出时记忆会落进「通用记忆」。
+跨项目通用的个人偏好（回复语言、语气）可以留在通用记忆里；项目约束、路径、
+部署方式必须带 `project`。
+
 记忆底座的形态：每轮对话先落进**会话归档**，底座在后台按会话批量提炼成
 **长期记忆**（偏好 / 实体 / 事件），核心准则单独存放在 `soul.md`。
-记忆按 TokenHub 用户隔离——同一个用户的 Codex、Claude、OpenCode 共享同一份记忆，
-不存在 per-agent 的记忆空间。
+记忆按 TokenHub **用户 + 项目**隔离——同一个用户的 Codex、Claude、OpenCode 在同一项目下
+共享同一份记忆，不存在 per-agent 的记忆空间；不同项目之间完全看不到彼此的记忆。
+
+**项目怎么传**：`memory_recall` / `memory_scene_write` / `memory_core_read` /
+`memory_core_write` / `skill_*` 都接受 `project`，取值就是当前工作目录名。在某个
+仓库里干活时每个记忆调用都要带上它；只有明确要读写「通用记忆」（跨项目的个人偏好）
+时才省略。
 
 **谁负责写入**：
 
@@ -151,9 +163,9 @@ SKILL.md 格式，frontmatter 必须含 name/description）。更新已有 Skill
 | `kb_import` | 导入本机文件或已确认结论；先 `kb_list` 确认目标库 |
 | `kb_documents` | 列出文档状态、分块数和时间；整理或删除前定位目标 |
 | `kb_status` | 查看文档状态统计和解析管线进度 |
-| `memory_recall` | 检索长期记忆，可选同时检索会话归档 |
+| `memory_recall` | 检索当前项目的长期记忆，可选同时检索会话归档 |
 | `memory_capture` | 手动补写会话归档；网关已自动写入，正常不要调用 |
-| `memory_scene_write` | 把已确认的规则、约束或工作流写入稳定路径的长期记忆 |
+| `memory_scene_write` | 把已确认的规则、约束或工作流写入当前项目的稳定路径 |
 | `memory_core_read` | 读取核心准则（soul.md） |
 | `memory_core_write` | 全量覆盖核心准则（先读再写） |
 | `skill_listing` / `skill_search` / `skill_get` | 发现和读取可复用 Skill |
@@ -161,8 +173,10 @@ SKILL.md 格式，frontmatter 必须含 name/description）。更新已有 Skill
 
 ## 隔离与可删除性
 
-- 记忆按 TokenHub **用户**隔离：同一用户的任意 Agent 共享同一份记忆，无法
-   （也不应）跨用户读取或写入。
+- 记忆按 TokenHub **用户 + 项目**隔离：同一用户在同一项目下的任意 Agent 共享同一份
+  记忆，无法（也不应）跨用户读取或写入；不同项目的记忆互相不可见，也不可能被召回。
+- 项目由调用方通过 `project` 参数声明；省略即「通用记忆」——控制台 Agent Chat 与
+  识别不出项目的历史数据都在这一仓，任何项目下都能召回。
 - 用户可在 Console「知识库与记忆」查看、搜索和删除知识库文档、记忆与 Skill。
 - 核心准则可在 Console「知识库与记忆 → 记忆 → 工作准则」查看和编辑。
 - 删除前应向用户确认，删除是不可恢复的数据面操作。
