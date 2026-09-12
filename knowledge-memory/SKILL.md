@@ -1,8 +1,7 @@
 ---
 name: knowledge-memory
 description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。用户询问公司/项目/业务/产品等内部事实先查知识库；提到历史约定、个人偏好或继续先前任务先查记忆；需要复用或沉淀流程时用 Skill。
-version: 2026.09.12.1
-source: https://github.com/volcengine/OpenViking
+version: 2026.09.12.2
 ---
 
 # 知识库与记忆
@@ -88,10 +87,10 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 
 **谁负责写入**：
 
-- 在 TokenHub 控制台的 Agent Chat 里，网关会**自动**把每轮对话追加进会话归档，
-  不要再调用 `memory_capture`，否则同一轮会被记两遍。
-- 通过 MCP 接入的其他客户端（Codex / Claude Code / OpenCode 等），网关看不到你们的
-  对话，**没有自动写入**：有沉淀价值的轮次要自己调用 `memory_capture`。
+- 网关会**自动**把经过它的每一轮对话追加进会话归档——控制台 Agent Chat 与所有
+  直连网关的 Agent 客户端都算。**不要调用 `memory_capture`**，否则同一轮会被记两遍。
+- 你唯一要做的是判断：哪些结论值得**立刻**变成长期记忆，再用 `memory_scene_write`
+  或 `memory_core_write` 写死。
 
 **提炼是批量异步的**，不是即时生效：底座要等会话攒够一批消息、累计 token 到量，
 或空闲一段时间后才提炼。所以刚说完的内容不一定马上能被 `memory_recall` 搜到。
@@ -100,7 +99,8 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 
 ## 记忆的写入
 
-符合下面两类内容的轮次，在 MCP 客户端里用 `memory_capture` 追加进会话归档：
+会话归档由网关自动写入，不需要你操心。你要判断的是下面两类内容，并用
+`memory_scene_write` / `memory_core_write` 立刻固化成长期记忆：
 
 1. 用户明确要求记住。
 2. 对话包含长期价值：稳定偏好、项目约束、关键决策、复用结论。
@@ -152,7 +152,7 @@ SKILL.md 格式，frontmatter 必须含 name/description）。更新已有 Skill
 | `kb_documents` | 列出文档状态、分块数和时间；整理或删除前定位目标 |
 | `kb_status` | 查看文档状态统计和解析管线进度 |
 | `memory_recall` | 检索长期记忆，可选同时检索会话归档 |
-| `memory_capture` | 把一轮有长期价值的对话追加进会话归档（仅 MCP 客户端需要手动调） |
+| `memory_capture` | 手动补写会话归档；网关已自动写入，正常不要调用 |
 | `memory_scene_write` | 把已确认的规则、约束或工作流写入稳定路径的长期记忆 |
 | `memory_core_read` | 读取核心准则（soul.md） |
 | `memory_core_write` | 全量覆盖核心准则（先读再写） |
