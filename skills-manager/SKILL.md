@@ -1,8 +1,9 @@
 ---
 name: skills-manager
 description: 检查、安装和更新 bb-game Agent Skills。用户要求更新/检查/安装 skills 或提到 skills 版本旧时使用；执行由跨 Agent 的 skills-manager CLI 完成。
-version: 2026.09.07.1
-source: https://github.com/bb-game/skills
+metadata:
+  version: "2026.09.07.2"
+  source: https://github.com/bb-game/skills
 ---
 
 # Skills Manager

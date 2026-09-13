@@ -1,7 +1,8 @@
 ---
 name: knowledge-memory
 description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。涉及公司/项目/业务等内部事实先查知识库；涉及项目约定、构建测试命令、架构约束、用户偏好或继续先前任务时先查记忆；纯机械改动不要检索。需要复用或沉淀流程时用 Skill。
-version: 2026.09.13.6
+metadata:
+  version: "2026.09.13.7"
 ---
 
 # 知识库与记忆

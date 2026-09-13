@@ -89,19 +89,38 @@ def parse_agents(value: str | None) -> list[str]:
 
 
 def read_frontmatter(path: Path) -> dict[str, str]:
+    """解析 SKILL.md 的 YAML frontmatter（只取标量，够版本比对用）。
+
+    Agent Skills 规范只允许 name/description/license/compatibility/metadata/
+    allowed-tools 六个顶层字段，自研字段必须放进 metadata（如 metadata.version），
+    否则严格校验的客户端会拒绝整个 Skill。这里把一层 metadata 映射展开成
+    ``metadata.version`` 这类扁平键，顶层同名键仍然保留以兼容已安装的旧版本。
+    """
     if not path.is_file():
         return {}
     fields: dict[str, str] = {}
     with path.open(encoding="utf-8") as handle:
         if handle.readline().rstrip() != "---":
             return fields
+        section = ""
         for line in handle:
             line = line.rstrip()
             if line == "---":
                 break
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
             key, separator, value = line.partition(":")
-            if separator:
-                fields[key.strip()] = value.strip()
+            if not separator:
+                continue
+            key = key.strip()
+            value = value.strip().strip("\"'")
+            if line[:1].isspace():
+                if section:
+                    fields[f"{section}.{key}"] = value
+                continue
+            section = key if not value else ""
+            if value:
+                fields[key] = value
     return fields
 
 
@@ -144,12 +163,18 @@ def fetch_repo(source: Path, clone_url: str, branch: str) -> None:
     )
 
 
+def skill_version(path: Path) -> str:
+    """取 Skill 版本：优先 metadata.version，回退顶层 version（旧格式）。"""
+    fields = read_frontmatter(path)
+    return fields.get("metadata.version") or fields.get("version") or "unknown"
+
+
 def source_version(source: Path, skill: Skill) -> str:
-    return read_frontmatter(source / skill.path / "SKILL.md").get("version", "unknown")
+    return skill_version(source / skill.path / "SKILL.md")
 
 
 def installed_version(target_root: Path, skill: Skill) -> str:
-    return read_frontmatter(target_root / skill.name / "SKILL.md").get("version", "unknown")
+    return skill_version(target_root / skill.name / "SKILL.md")
 
 
 def install_executable(source: Path) -> Path:
