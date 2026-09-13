@@ -1,7 +1,7 @@
 ---
 name: knowledge-memory
 description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。用户询问公司/项目/业务/产品等内部事实先查知识库；提到历史约定、个人偏好或继续先前任务先查记忆；需要复用或沉淀流程时用 Skill。
-version: 2026.09.12.2
+version: 2026.09.13.1
 ---
 
 # 知识库与记忆
@@ -132,6 +132,17 @@ Agent Skill 三组工具。客户端只需要支持 MCP；身份由 TokenHub Gat
 
 路径必须相对且稳定，例如 `preferences/communication.md`，不要使用临时会话路径。
 
+**结论被推翻时改写原路径，不要并列新增**：同一个结论只在一条稳定路径上维护。用户说
+“以前那条不适用了 / 现在不用兼容了 / 已经反过来”，就改写原来那条（`memory_scene_write`
+到同一个 path，覆盖旧内容），而不是新写一条并列记忆——两条互相矛盾的长期记忆会同时被
+召回，Agent 只能自己猜哪条还成立。改写后在正文里带上时间（如“2026-09-13 起不再需要
+兼容 X”），下次才判断得出新旧。
+
+**临时性约束写 `events/`，不要占用长期路径**：“这个接口暂时不能动 / 下周再删这个字段 /
+先用某个绕法”这类会过期的约束，写入 `events/<YYYY>/<MM>/<DD>/<topic>.md`，让它按 7 天
+自然过期。写进 `preferences/` 或 `entities/` 等于把它钉成永久规则，过期后仍会被召回并
+干扰判断。
+
 ## 核心准则
 
 涉及长期准则、跨项目偏好或团队规范时，先调用 `memory_core_read` 了解当前内容；
@@ -165,7 +176,7 @@ SKILL.md 格式，frontmatter 必须含 name/description）。更新已有 Skill
 | `kb_status` | 查看文档状态统计和解析管线进度 |
 | `memory_recall` | 检索当前项目的长期记忆，可选同时检索会话归档 |
 | `memory_capture` | 手动补写会话归档；网关已自动写入，正常不要调用 |
-| `memory_scene_write` | 把已确认的规则、约束或工作流写入当前项目的稳定路径 |
+| `memory_scene_write` | 把已确认的规则、约束或工作流写入当前项目的稳定路径（结论被推翻时改写同一路径，不要并列新增） |
 | `memory_core_read` | 读取核心准则（soul.md） |
 | `memory_core_write` | 全量覆盖核心准则（先读再写） |
 | `skill_listing` / `skill_search` / `skill_get` | 发现和读取可复用 Skill |
