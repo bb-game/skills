@@ -2,7 +2,7 @@
 name: knowledge-memory
 description: 通过 TokenHub MCP 使用平台知识库、用户长期记忆和 Agent Skill。涉及公司/项目/业务等内部事实先查知识库；涉及项目约定、构建测试命令、架构约束、用户偏好或继续先前任务时先查记忆；纯机械改动不要检索。需要复用或沉淀流程时用 Skill。
 metadata:
-  version: "2026.09.14.2"
+  version: "2026.09.15.1"
 ---
 
 # 知识库与记忆
@@ -88,6 +88,9 @@ metadata:
 - `events/<YYYY>/<MM>/<DD>/<topic>.md`：一次性事件（7 天后过期）。
 - **先召回再写**：写之前用 `memory_recall` 查一遍，同一主题已经有条目就改写那个 path，不要另起
   一条。两条讲同一件事的记忆会同时被召回，Agent 只能自己猜哪条还成立。
+- **改写是覆盖，先 `memory_read` 读全文**：`memory_recall` 只给摘要，照摘要覆盖会把条目里没被
+  摘到的那部分直接删掉。改哪个 path 就先读哪个 path；不确定这条记忆落在哪时用 `memory_grep`
+  按字面搜（术语、路径、版本号、接口名这类），再用 `memory_ls` 看清那一层有什么。
 - **一个实体只留一张卡**：`entities/` 下不要按主题或阶段加后缀新开并列卡——「X 部署」「X 部署配置」
   「X 采集」是同一个实体，应当合并进 `entities/<category>/x.md` 一张。category 也要和已有卡片保持
   一致：同一个实体换个 category 就是换了个路径，两张卡永远不会合到一起。
@@ -217,6 +220,9 @@ frontmatter 必须含 name/description）；更新已有 Skill 先 `skill_get` �
 | `kb_images` | 取回文档插图本体；结论依赖图上内容、或用户明确要看图时用 |
 | `kb_status` | 查看文档状态统计和解析管线进度 |
 | `memory_recall` | 检索当前项目的长期记忆，可选同时检索会话归档 |
+| `memory_ls` | 列出记忆树一层，读/写某条之前先看清这一仓里有什么 |
+| `memory_read` | 读某条记忆全文（`memory_recall` 只给摘要）；改写前必须先读 |
+| `memory_grep` | 按字面/正则找术语、路径、版本号、接口名；语义近似用 `memory_recall` |
 | `memory_capture` | 手动补写会话归档；网关已自动写入，正常不要调用 |
 | `memory_scene_write` | 把已确认的规则、约束或工作流写入稳定路径（结论被推翻时改写同一路径，不要并列新增） |
 | `memory_core_read` | 读取核心准则与协作画像（画像只读，由底座自动收敛） |
